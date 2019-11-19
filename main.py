@@ -1,69 +1,55 @@
+import json
 import time
 
+import click
 import requests
+from requests import ConnectionError
+
+from cbreaker_decorator import circuit_breaker
+from exceptions import CircuitOpenException
 
 
-class CircuitOpenException(Exception):
-    pass
+@circuit_breaker(exception=ConnectionError, failure_threshold=4, max_open_calls=3)
+def make_http_call(endpoint, method="get", data=None, headers=None):
+    request_method = getattr(requests, method)
+    return request_method(endpoint, json=data, headers=headers)
 
 
-def circuit_breaker(
-    _func=None, *, exception=Exception, failure_threshold=3, max_open_call=5
-):
-    def _circuit_breaker(func):
-        def circuit(*args, **kwargs):
-            if (
-                circuit.failure_count > 0
-                and circuit.failure_count >= circuit.failure_threshold
-            ):
-                circuit.circuit_open_call_count += 1
+@click.command()
+@click.option("--login", help="API login")
+@click.option("--password", help="API password")
+def main(login, password):
+    base_url = "http://127.0.0.1:8000/v1"
+    auth_url = f"{base_url}/authenticate"
+    projects_url = f"{base_url}/projects/"
 
-                if circuit.circuit_open_call_count <= circuit.max_open_call:
-                    raise CircuitOpenException(
-                        "Circuit is open. No external calls being made."
-                    )
-                else:
-                    circuit.circuit_open_call_count = 0
+    auth_response = make_http_call(
+        auth_url, method="post", data={"login": login, "password": password}
+    )
 
-            try:
-                result = func(*args, **kwargs)
-                circuit.failure_count = 0
-                circuit.circuit_open_call_count = 0
-                return result
-            except exception as e:
-                circuit.failure_count += 1
-                raise e
+    if not auth_response or auth_response.status_code != 200:
+        click.echo(click.style("Login failed...", fg="red", bold=True))
+        click.echo(click.style(str(auth_response.json()), fg="red"))
+        return
 
-        circuit.failure_threshold = failure_threshold
-        circuit.max_open_call = max_open_call
-        circuit.failure_count = 0
-        circuit.circuit_open_call_count = 0
+    jwt_token = auth_response.json()["token"]
 
-        return circuit
-
-    if _func is None:
-        return _circuit_breaker
-    else:
-        return _circuit_breaker(_func)
-
-
-@circuit_breaker(
-    exception=requests.ConnectionError, failure_threshold=4, max_open_call=3
-)
-def make_call(endpoint):
-    return requests.get(endpoint)
+    while True:
+        try:
+            result = make_http_call(
+                projects_url, headers={"Authorization": f"JWT {jwt_token}"}
+            )
+            success_msg = f"Request made successfully, status={result.status_code}, content:"
+            click.echo(click.style(success_msg, fg="green"))
+            click.echo(click.style(json.dumps(result.json(), indent=2), fg="green", bold=True))
+            time.sleep(3)
+        except requests.ConnectionError as e:
+            click.echo(click.style(str(e), fg="yellow"))
+            time.sleep(1)
+        except CircuitOpenException as e:
+            click.echo(click.style(str(e), fg="bright_yellow", bold=True))
+            time.sleep(3)
 
 
 if __name__ == "__main__":
-    while True:
-        try:
-            result = make_call("https://jsonplaceholder.typicode.com/users/1")
-            print(f"Request made successfully, status={result.status_code}, content:")
-            print(result.json())
-            time.sleep(3)
-        except requests.ConnectionError as e:
-            print(e)
-            time.sleep(1)
-        except CircuitOpenException as e:
-            print(e)
-            time.sleep(3)
+    main()
