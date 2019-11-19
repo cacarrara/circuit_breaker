@@ -9,7 +9,7 @@ class CircuitBreaker:
         self.exception_to_catch = exception
         self.failure_threshold = failure_threshold
         self.max_open_calls = max_open_calls
-        self.reset_failures()
+        self.init_failures_count()
 
     def __call__(self, *args, **kwargs):
         if self.is_circuit_open():
@@ -17,7 +17,7 @@ class CircuitBreaker:
 
         try:
             result = self.inner_func(*args, **kwargs)
-            self.reset_failures()
+            self.init_failures_count()
             return result
         except self.exception_to_catch as e:
             self.failure_count += 1
@@ -26,7 +26,7 @@ class CircuitBreaker:
     def is_circuit_open(self):
         return self.failure_count > 0 and self.failure_count > self.failure_threshold
 
-    def reset_failures(self):
+    def init_failures_count(self):
         self.failure_count = 0
         self.circuit_open_call_count = 0
 
