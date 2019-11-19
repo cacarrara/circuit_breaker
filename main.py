@@ -43,7 +43,7 @@ def main(login, password):
             click.echo(click.style(success_msg, fg="green"))
             click.echo(click.style(json.dumps(result.json(), indent=2), fg="green", bold=True))
             time.sleep(3)
-        except requests.ConnectionError as e:
+        except ConnectionError as e:
             click.echo(click.style(str(e), fg="yellow"))
             time.sleep(1)
         except CircuitOpenException as e:
